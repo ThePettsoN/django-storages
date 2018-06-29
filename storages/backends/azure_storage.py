@@ -4,6 +4,9 @@ import time
 from datetime import datetime
 from time import mktime
 
+from azure.common import AzureMissingResourceHttpError
+from azure.storage.blob import BlockBlobService, ContentSettings
+
 from django.core.exceptions import ImproperlyConfigured
 from django.core.files.base import ContentFile
 from django.core.files.storage import Storage
@@ -17,14 +20,6 @@ except ImportError:
     raise ImproperlyConfigured(
         "Could not load Azure bindings. "
         "See https://github.com/WindowsAzure/azure-sdk-for-python")
-
-try:
-    # azure-storage 0.20.0
-    from azure.storage.blob.blobservice import BlobService
-    from azure.common import AzureMissingResourceHttpError
-except ImportError:
-    from azure.storage import BlobService
-    from azure import WindowsAzureMissingResourceError as AzureMissingResourceHttpError
 
 
 def clean_name(name):
@@ -45,8 +40,7 @@ class AzureStorage(Storage):
     @property
     def connection(self):
         if self._connection is None:
-            self._connection = BlobService(
-                self.account_name, self.account_key)
+            self._connection = BlockBlobService(account_name = self.account_name, account_key = self.account_key)
         return self._connection
 
     @property
@@ -65,7 +59,7 @@ class AzureStorage(Storage):
             return None
 
     def _open(self, name, mode="rb"):
-        contents = self.connection.get_blob(self.azure_container, name)
+        contents = self.connection.get_blob_to_bytes(self.azure_container, name).content
         return ContentFile(contents)
 
     def exists(self, name):
@@ -93,9 +87,11 @@ class AzureStorage(Storage):
         else:
             content_data = content.read()
 
-        self.connection.put_blob(self.azure_container, name,
-                                 content_data, "BlockBlob",
-                                 x_ms_blob_content_type=content_type)
+        content_settings = ContentSettings(content_type=content_type)
+        self.connection.create_blob_from_bytes(self.azure_container,
+                                               name,
+                                               content_data,
+                                               content_settings=content_settings)
         return name
 
     def url(self, name):
